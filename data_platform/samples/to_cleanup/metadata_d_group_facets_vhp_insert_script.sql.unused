@@ -1,0 +1,170 @@
+
+-- ============================================================================
+-- DLT METADATA TABLES
+-- ============================================================================
+-- This script populates all four DLT metadata configuration tables for D_Group dimensions
+-- Used to configure and manage Delta Live Tables pipeline processes
+-- ============================================================================
+-- INSERT DATA STATEMENTS
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 1. CDC Configuration Data
+-- ----------------------------------------------------------------------------
+-- Insert Change Data Capture configuration data
+
+INSERT INTO edl_dev_ctlg.structured.dlt_metadata_cdc_config (
+  `source`,
+  `input_table`,
+  `target_table`,
+  `key_attr`,
+  `except_column_list`,
+  `compute_cdc`,
+  `scd_type`,
+  `create_date`,
+  `update_date`,
+  `exclude_columns`,
+  `sequence_col`
+) VALUES
+('DF_GROUP_FACETS', 'cmc_grgr_group', 'DF_Group', 'Group_Source_Key,Source_System_Code', 'action_details,is_valid', 'N', '1', '2025-04-17 15:48:44.354000', '2025-04-17 15:48:44.354000', array(), 'business_date'),
+('DF_GROUP_FACETS', 'cmc_grgr_group_history', 'DF_Group_History', 'Group_Source_Key,Source_System_Code', 'action_details,is_valid', 'N', '2', NULL, NULL, array(), 'business_date'),
+('DF_GROUP_FACETS', 'cmc_grgc_group_count', 'DF_Group_Count', 'Group_Source_Key,Count_Type,Source_System_Code,Row_Effective_Date', 'action_details,is_valid', 'Y', '1', '2025-04-29 15:27:32.502000', '2025-04-29 15:27:32.502000', array(), 'business_date');
+
+-- ----------------------------------------------------------------------------
+-- 2. Data Quality Configuration Data
+-- ----------------------------------------------------------------------------
+-- Insert Data Quality configuration data
+
+INSERT INTO edl_dev_ctlg.structured.dlt_metadata_dq_config (
+  `input_table`,
+  `target_table`,
+  `source_column_name`,
+  `action`,
+  `constraint`,
+  `is_active`,
+  `deactivation_date`,
+  `create_date`,
+  `mocked_ind`
+) VALUES
+('cmc_grgr_group', 'DF_Group', 'GRGR_ID', 'FAIL', 'GRGR_ID is null', 'Y', '1900-01-01 00:00:00', '2025-03-24 19:55:07.576000', 'N'),
+('bcbsla_ma_group_history', 'DF_Group_History', 'Group_Address_Line_1', 'WARN', 'Group_Address_Line_1 is null', 'Y', '1900-01-01 00:00:00', '2025-03-24 21:07:48.213000', 'N'),
+('bcbsla_ma_group_history', 'DF_Group_History', 'Group_ID', 'FAIL', 'Group_ID is null', 'Y', '1900-01-01 00:00:00', '2025-03-24 20:46:59.494000', 'N'),
+('cmc_grgr_group_history', 'DF_Group_History', 'GRGR_CK', 'FAIL', 'GRGR_CK is null', 'Y', '1900-01-01 00:00:00', '2025-03-24 20:19:20.492000', 'N'),
+('cmc_grgc_group_count', 'DF_Group_Count', 'GRGR_CK', 'FAIL', 'GRGR_CK is null', 'Y', '1900-01-01 00:00:00', '2025-03-24 21:15:47.373000', 'N'),
+('cmc_grgc_group_count', 'DF_Group_Count', 'GRGC_COUNT', 'QUARANTINE', 'GRGC_COUNT = 0', 'Y', '1900-01-01 00:00:00', '2025-03-24 21:16:50.216000', 'N'),
+('bcbsla_ma_group_history', 'DF_Group_History', 'Group_Address_Line_2', 'WARN', 'Group_Address_Line_2 is null', 'Y', '1900-01-01 00:00:00', '2025-03-24 21:08:07.336000', 'N'),
+('cmc_grgr_group', 'DF_Group', 'GRGR_CK', 'FAIL', 'GRGR_CK is null', 'Y', '1900-01-01 00:00:00', '2025-03-24 19:50:13.058000', 'N'),
+('cmc_grgr_group', 'DF_Group', 'GRGR_MCTR_TYPE', 'WARN', 'trim(GRGR_MCTR_TYPE)=''UNK''', 'Y', '1900-01-01 00:00:00', '2025-03-24 19:55:07.576000', 'Y'),
+('cmc_grgr_group', 'DF_Group', 'GRGR_NAME', 'WARN', 'trim(GRGR_NAME)=''Unknown''', 'Y', '1900-01-01 00:00:00', '2025-03-24 19:55:07.576000', 'Y'),
+('cmc_grgr_group', 'DF_Group', 'GRGR_ID', 'QUARANTINE', 'trim(GRGR_ID)=''XXXXX''', 'Y', '1900-01-01 00:00:00', '2025-03-24 19:55:07.576000', 'Y'),
+('cmc_grgr_group', 'DF_Group', 'GRGR_NAME', 'QUARANTINE', 'trim(GRGR_NAME)=''XXXXX''', 'Y', '1900-01-01 00:00:00', '2025-03-24 19:55:07.576000', 'Y'),
+('cmc_grgr_group_history', 'DF_Group_History', 'CICI_ID', 'WARN', 'trim(CICI_ID)=''UNK''', 'Y', '1900-01-01 00:00:00', '2025-03-24 19:55:07.576000', 'Y'),
+('cmc_grgr_group_history', 'DF_Group_History', 'GRGR_STS', 'WARN', 'trim(GRGR_STS)=''XX'' and trim(GRGR_STS)<>''''', 'Y', '1900-01-01 00:00:00', '2025-03-24 19:55:07.576000', 'Y'),
+('cmc_grgr_group_history', 'DF_Group_History', 'GRGR_ID', 'QUARANTINE', 'trim(GRGR_ID)=''XXXXX''', 'Y', '1900-01-01 00:00:00', '2025-03-24 19:55:07.576000', 'Y'),
+('cmc_grgr_group_history', 'DF_Group_History', 'GRGR_CTRY_CD', 'QUARANTINE', 'trim(GRGR_CTRY_CD)=''UK'' and trim(GRGR_CTRY_CD)<>''''', 'Y', '1900-01-01 00:00:00', '2025-03-24 19:55:07.576000', 'Y'),
+('cmc_grgc_group_count', 'DF_Group_Count', 'GRGC_MCTR_CTYP', 'WARN', 'trim(GRGC_MCTR_CTYP)=''UNK''', 'Y', '1900-01-01 00:00:00', '2025-03-24 19:55:07.576000', 'Y');
+
+-- ----------------------------------------------------------------------------
+-- 3. Source Configuration Data
+-- ----------------------------------------------------------------------------
+-- Insert Source configuration data
+
+INSERT INTO edl_dev_ctlg.structured.dlt_metadata_source_config (
+  `source`,
+  `derived_input_tables`,
+  `source_schema`,
+  `derived_target_tables`,
+  `dimension_table`,
+  `source_details`,
+  `source_type`,
+  `frequency`,
+  `scenario`,
+  `source_system`,
+  `sourced_from`,
+  `is_active`,
+  `deactivation_date`,
+  `create_date`,
+  `target_table`,
+  `enable_change_data_feed`,
+  `business_date_column_name`,
+  `file_format`,
+  `test_mode`
+) VALUES
+('DF_GROUP_FACETS', 'cmc_grgc_group_count', 'dbo', 'DF_Group_Count', 'D_Group', '/Volumes/edl_dev_ctlg/rawfiles/raw/EDF/Facets/History/dbo_cmc_grgc_group_count/', 'DATABRICKS_VOLUMES', 'N/A', 'historical_run', 'Facets', 'SQL Server', 'Y', '1900-01-01 00:00:00', '2025-04-22 15:19:31.849000', 'DF_Group_Count', TRUE, NULL, 'parquet', 'N'),
+('DF_GROUP_FACETS', 'cmc_grgc_group_count', 'test', 'DF_Group_Count', 'D_Group', '/Volumes/edl_dev_ctlg/rawfiles/raw/EDF/Facets/Test/History/dbo_cmc_grgc_group_count', 'DATABRICKS_VOLUMES', 'N/A', 'historical_run', 'Facets', 'SQL Server', 'Y', NULL, NULL, 'DF_Group_Count', TRUE, NULL, 'parquet', 'Y'),
+('DF_GROUP_FACETS', 'cmc_grgr_group', 'dbo', 'DF_Group', 'D_Group', '/Volumes/edl_dev_ctlg/rawfiles/raw/EDF/Facets/History/dbo_cmc_grgr_group/', 'DATABRICKS_VOLUMES', 'N/A', 'historical_run', 'Facets', 'SQL Server', 'Y', '1900-01-01 00:00:00', '2025-03-20 20:25:37.538000', 'DF_Group', FALSE, '', 'parquet', 'N'),
+('DF_GROUP_FACETS', 'cmc_grgr_group_history', 'audit', 'DF_Group_History', 'D_Group', '/Volumes/edl_dev_ctlg/rawfiles/raw/EDF/Facets/History/audit_cmc_grgr_group/', 'DATABRICKS_VOLUMES', 'N/A', 'historical_run', 'Facets', 'SQL Server', 'Y', '1900-01-01 00:00:00', '2025-03-20 21:18:52.356000', 'DF_Group_History', FALSE, 'HIST_CREATE_DTM', 'parquet', 'N'),
+('DF_GROUP_FACETS', 'cmc_grgr_group,cmc_grgr_group_history', 'test', 'DF_Group, DF_Group_History', 'D_Group', '/Volumes/edl_dev_ctlg/rawfiles/raw/EDF/Facets/Test/History/dbo_cmc_grgr_group/', 'DATABRICKS_VOLUMES', 'N/A', 'historical_run', 'Facets', 'SQL Server', 'Y', NULL, NULL, 'DF_Group', FALSE, 'transaction_dtm', 'parquet', 'Y'),
+('DF_GROUP_VHP', 'bcbsla_ma_group,bcbsla_ma_group_history', 'N/A', 'DF_Group, DF_Group_History', 'D_Group', '/Volumes/edl_dev_ctlg/rawfiles/raw/EDF/VHP/BusinessStartDate=20250305/Group/', 'DATABRICKS_VOLUMES', 'daily', 'historical_run', 'VHP', 'Flat File', 'Y', NULL, NULL, 'DF_Group', FALSE, NULL, 'csv', 'Y'),
+('DF_GROUP_FACETS', 'cmc_grgc_group_count', 'dbo', 'DF_Group_Count', 'D_Group', '/Volumes/edl_dev_ctlg/rawfiles/raw/EDF/Facets/BusinessStartDate={}/dbo_cmc_grgc_group_count/', 'DATABRICKS_VOLUMES', 'daily', 'incremental_run,apply_correction,apply_test', 'Facets', 'SQL Server', 'Y', '1900-01-01 00:00:00', '2025-03-20 21:12:59.064000', 'DF_Group_Count', TRUE, NULL, 'parquet', 'N'),
+('DF_GROUP_FACETS', 'cmc_grgc_group_count', 'test', 'DF_Group_Count', 'D_Group', '/Volumes/edl_dev_ctlg/rawfiles/raw/EDF/Facets/Test/BusinessStartDate={}/dbo_cmc_grgc_group_count/', 'DATABRICKS_VOLUMES', 'N/A', 'incremental_run,apply_correction,apply_test', 'Facets', 'SQL Server', 'Y', NULL, NULL, 'DF_Group_Count', TRUE, NULL, 'parquet', 'Y'),
+('DF_GROUP_VHP', 'bcbsla_ma_group,bcbsla_ma_group_history', 'N/A', 'DF_Group, DF_Group_History', 'D_Group', '/Volumes/edl_dev_ctlg/rawfiles/raw/EDF/VHP/BusinessStartDate={}/Group/', 'DATABRICKS_VOLUMES', 'daily', 'incremental_run,apply_correction,apply_test', 'VHP', 'Flat File', 'Y', NULL, NULL, 'DF_Group', FALSE, NULL, 'csv', 'N'),
+('DF_GROUP_FACETS', 'cmc_grgr_group, cmc_grgr_group_history', 'cdc', 'DF_Group, DF_Group_History', 'D_Group', '/Volumes/edl_dev_ctlg/rawfiles/raw/EDF/Facets/BusinessStartDate={}/cdc_cmc_grgr_group/', 'DATABRICKS_VOLUMES', 'daily', 'incremental_run,apply_correction,apply_test', 'Facets', 'SQL Server', 'Y', '1900-01-01 00:00:00', '2025-03-20 20:29:21.194000', 'DF_Group', FALSE, NULL, 'parquet', 'N'),
+('DF_GROUP_FACETS', 'cmc_grgr_group,cmc_grgr_group_history', 'test', 'DF_Group, DF_Group_History', 'D_Group', '/Volumes/edl_dev_ctlg/rawfiles/raw/EDF/Facets/Test/BusinessStartDate={}/cdc_cmc_grgr_group/', 'DATABRICKS_VOLUMES', 'N/A', 'incremental_run,apply_correction,apply_test', 'Facets', 'SQL Server', 'Y', NULL, NULL, 'DF_Group', FALSE, NULL, 'parquet', 'Y');
+
+-- ----------------------------------------------------------------------------
+-- 4. Transform Configuration Data
+-- ----------------------------------------------------------------------------
+-- Insert Transform configuration data
+
+INSERT INTO edl_dev_ctlg.structured.dlt_metadata_transform_config (
+  `input_table`,
+  `target_table`,
+  `source_column_name`,
+  `type`,
+  `transform_fn_name`,
+  `is_active`,
+  `deactivation_date`,
+  `create_date`
+) VALUES
+('cmc_grgc_group_count', 'DF_Group_Count', 'GRGC_MCTR_CTYP', 'trim', 'trim', 'Y', '1900-01-01 00:00:00', '2025-03-24 22:03:41.903000'),
+('bcbsla_ma_group_history', 'DF_Group_History', 'Group_EIN', 'trim', 'trim', 'Y', '1900-01-01 00:00:00', '2025-05-28 03:16:33.160620'),
+('bcbsla_ma_group_history', 'DF_Group_History', 'Group_Renewal_Month', 'trim', 'trim', 'Y', '1900-01-01 00:00:00', '2025-05-28 03:15:29.117716'),
+('cmc_grgr_group', 'DF_Group', 'GRGR_CK', 'trim', 'trim', 'Y', '1900-01-01 00:00:00', '2025-03-24 22:03:41.903000'),
+('cmc_grgr_group', 'DF_Group', 'GRGR_ID', 'trim', 'trim', 'Y', '1900-01-01 00:00:00', '2025-03-24 22:04:27.495000'),
+('cmc_grgr_group', 'DF_Group', 'GRGR_NAME', 'trim', 'trim', 'Y', '1900-01-01 00:00:00', '2025-03-24 22:05:12.966000'),
+('bcbsla_ma_group_history', 'DF_Group_History', 'Group_Fax_Ext', 'trim', 'trim', 'Y', '1900-01-01 00:00:00', '2025-05-28 03:13:35.958730'),
+('bcbsla_ma_group_history', 'DF_Group_History', 'Group_Phone_Ext', 'trim', 'trim', 'Y', '1900-01-01 00:00:00', '2025-05-28 03:12:39.255170'),
+('bcbsla_ma_group_history', 'DF_Group_History', 'Group_Fax_Number', 'trim', 'trim', 'Y', '1900-01-01 00:00:00', '2025-05-28 03:13:01.619072'),
+('bcbsla_ma_group_history', 'DF_Group_History', 'Group_Phone_Number', 'trim', 'trim', 'Y', '1900-01-01 00:00:00', '2025-05-28 03:12:24.330037'),
+('bcbsla_ma_group_history', 'DF_Group_History', 'Group_Address_State', 'trim', 'trim', 'Y', '1900-01-01 00:00:00', '2025-05-28 03:11:01.050347'),
+('bcbsla_ma_group_history', 'DF_Group_History', 'Group_Address_Country', 'trim', 'trim', 'Y', '1900-01-01 00:00:00', '2025-05-28 03:11:43.237144'),
+('bcbsla_ma_group_history', 'DF_Group_History', 'Group_Email', 'trim', 'trim', 'Y', '1900-01-01 00:00:00', '2025-05-28 03:12:07.726776'),
+('bcbsla_ma_group_history', 'DF_Group_History', 'Group_Address_City', 'trim', 'trim', 'Y', '1900-01-01 00:00:00', '2025-05-28 03:10:51.634946'),
+('bcbsla_ma_group_history', 'DF_Group_History', 'Group_Address_Zip_Code', 'trim', 'trim', 'Y', '1900-01-01 00:00:00', '2025-05-28 03:11:26.817398'),
+('bcbsla_ma_group_history', 'DF_Group_History', 'Group_Address_Line_1', 'trim', 'trim', 'Y', '1900-01-01 00:00:00', '2025-05-28 03:09:59.293664'),
+('bcbsla_ma_group_history', 'DF_Group_History', 'Group_Address_Line_2', 'trim', 'trim', 'Y', '1900-01-01 00:00:00', '2025-05-28 03:10:08.923369'),
+('bcbsla_ma_group_history', 'DF_Group_History', 'Group_Address_Line_3', 'trim', 'trim', 'Y', '1900-01-01 00:00:00', '2025-05-28 03:10:30.953338'),
+('bcbsla_ma_group', 'DF_Group', 'Group_Name', 'trim', 'trim', 'Y', '1900-01-01 00:00:00', '2025-03-24 22:11:17.244000'),
+('bcbsla_ma_group', 'DF_Group', 'Group_ID', 'trim', 'trim', 'Y', '1900-01-01 00:00:00', '2025-03-24 22:09:06.238000'),
+('bcbsla_ma_group_history', 'DF_Group_History', 'Group_ID', 'trim', 'trim', 'Y', '1900-01-01 00:00:00', '2025-05-28 03:08:24.236775'),
+('bcbsla_ma_group', 'DF_Group', 'Group_Type_Code', 'trim', 'trim', 'Y', '1900-01-01 00:00:00', '2025-03-24 22:11:40.192000'),
+('bcbsla_ma_group', 'DF_Group', 'Group_Original_Effective_Date', 'trim', 'trim', 'Y', '1900-01-01 00:00:00', '2025-03-24 22:12:00.928000'),
+('cmc_grgr_group_history', 'DF_Group_History', 'GRGR_ID', 'trim', 'trim', 'Y', '1900-01-01 00:00:00', '2025-03-24 22:03:41.903000'),
+('cmc_grgr_group', 'DF_Group', 'Source_System_Code', 'default', 'Facets', 'Y', '1900-01-01 00:00:00', '2025-05-07 00:00:00'),
+('cmc_grgr_group_history', 'DF_Group_History', 'Source_System_Code', 'default', 'Facets', 'Y', '1900-01-01 00:00:00', '2025-03-24 22:03:41.903000'),
+('cmc_grgc_group_count', 'DF_Group_Count', 'Source_System_Code', 'default', 'Facets', 'Y', '1900-01-01 00:00:00', '2025-03-24 22:03:41.903000'),
+('cmc_grgr_group', 'DF_Group', 'GRGR_NAME', 'title case', 'initcap', 'Y', '1900-01-01 00:00:00', '2025-03-24 22:05:12.966000');
+
+
+
+CREATE TABLE IF NOT EXISTS edl_dev_ctlg.structured.dlt_runtime_config (`dimension_table` string,
+  `run_date` timestamp,
+  `scenario` string,
+  `source_params` map<string,struct<business_date:string,source_system:string,target_table:string,source_details:string,format:string>>);
+
+
+
+-- ============================================================================
+-- VERIFICATION QUERIES
+-- ============================================================================
+-- Uncomment the following queries to verify data was inserted correctly:
+
+-- SELECT COUNT(*) as cdc_config_count FROM edl_dev_ctlg.structured.dlt_metadata_cdc_config;
+-- SELECT COUNT(*) as dq_config_count FROM edl_dev_ctlg.structured.dlt_metadata_dq_config;
+-- SELECT COUNT(*) as source_config_count FROM edl_dev_ctlg.structured.dlt_metadata_source_config;
+-- SELECT COUNT(*) as transform_config_count FROM edl_dev_ctlg.structured.dlt_metadata_transform_config;
+
+-- ============================================================================
+-- END OF SCRIPT
+-- ============================================================================ 

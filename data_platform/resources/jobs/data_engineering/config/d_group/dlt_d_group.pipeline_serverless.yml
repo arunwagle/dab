@@ -1,0 +1,43 @@
+# The main pipeline for data_platform
+resources:
+  pipelines:
+    dlt_d_group_silver_pipeline_serverless:
+      name: dlt_d_group_silver_pipeline_serverless
+      edition: ADVANCED
+      catalog: edl_dev_ctlg
+      configuration:
+        catalog: edl_dev_ctlg
+        schema: structured
+        table_suffix: ${var.table_suffix}
+        dimension_table: D_GROUP
+        test_mode: "Y"
+      schema: structured
+      development: true
+      continuous: false
+      channel: CURRENT
+      photon: true
+      serverless: true
+      libraries:        
+        - notebook:
+            path: ${var.resource_path}/notebooks/data_engineering/dlt_silver_integrated_notebook.ipynb
+      
+    dlt_d_group_gold_pipeline_serverless:
+      name: dlt_d_group_gold_pipeline_serverless
+      edition: ADVANCED
+      catalog: edl_dev_ctlg
+      configuration:
+        catalog: edl_dev_ctlg
+        structured_schema: structured
+        curated_schema: curated
+        dimension_table: D_GROUP
+        table_suffix: ${var.table_suffix}
+      schema: structured
+      development: true
+      continuous: false
+      channel: CURRENT
+      photon: true
+      serverless: true
+      libraries:
+        - notebook:
+            path: ${var.resource_path}/notebooks/data_engineering/dlt_gold_integrated_notebook.ipynb
+      

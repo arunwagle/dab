@@ -1,0 +1,97 @@
+-- ============================================================================
+-- DLT METADATA TABLES
+-- ============================================================================
+-- This script creates  all four DLT metadata configuration tables
+-- Used to configure and manage Delta Live Tables pipeline processes
+-- 
+-- Tables included:
+-- 1. dlt_metadata_cdc_config - Change Data Capture configuration
+-- 2. dlt_metadata_dq_config - Data Quality configuration  
+-- 3. dlt_metadata_source_config - Source configuration
+-- 4. dlt_metadata_transform_config - Transform configuration
+-- ============================================================================
+
+-- ============================================================================
+-- CREATE TABLE STATEMENTS
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 1. CDC Configuration Table
+-- ----------------------------------------------------------------------------
+-- This table stores Change Data Capture configuration settings
+USE CATALOG edl_dev_ctlg;
+USE SCHEMA structured;
+
+CREATE TABLE IF NOT EXISTS dlt_metadata_cdc_config (
+  `source` string,
+  `input_table` string,
+  `target_table` string,
+  `key_attr` string,
+  `except_column_list` string,
+  `compute_cdc` string,
+  `scd_type` string,
+  `create_date` timestamp,
+  `update_date` timestamp,
+  `exclude_columns` array<string>,
+  `sequence_col` string
+);
+
+-- ----------------------------------------------------------------------------
+-- 2. Data Quality Configuration Table
+-- ----------------------------------------------------------------------------
+-- This table stores Data Quality configuration settings
+
+CREATE TABLE IF NOT EXISTS dlt_metadata_dq_config (
+  `input_table` string,
+  `target_table` string,
+  `source_column_name` string,
+  `action` string,
+  `constraint` string,
+  `is_active` string,
+  `deactivation_date` timestamp,
+  `create_date` timestamp,
+  `mocked_ind` string
+);
+
+-- ----------------------------------------------------------------------------
+-- 3. Source Configuration Table
+-- ----------------------------------------------------------------------------
+-- This table stores source configuration settings
+
+CREATE TABLE IF NOT EXISTS dlt_metadata_source_config (
+  `source` string,
+  `derived_input_tables` string,
+  `source_schema` string,
+  `derived_target_tables` string,
+  `dimension_table` string,
+  `source_details` string,
+  `source_type` string,
+  `frequency` string,
+  `scenario` string,
+  `source_system` string,
+  `sourced_from` string,
+  `is_active` string,
+  `deactivation_date` timestamp,
+  `create_date` timestamp,
+  `target_table` string,
+  `enable_change_data_feed` boolean,
+  `business_date_column_name` string,
+  `file_format` string,
+  `test_mode` string
+);
+
+-- ----------------------------------------------------------------------------
+-- 4. Transform Configuration Table
+-- ----------------------------------------------------------------------------
+-- This table stores transformation configuration settings
+
+CREATE TABLE IF NOT EXISTS dlt_metadata_transform_config (
+  `input_table` string,
+  `target_table` string,
+  `source_column_name` string,
+  `type` string,
+  `transform_fn_name` string,
+  `is_active` string,
+  `deactivation_date` timestamp,
+  `create_date` timestamp
+);

@@ -1,0 +1,42 @@
+# The main pipeline for data_platform
+resources:
+  pipelines:
+    dlt_<<ENTITY_NAME>>_silver_pipeline:
+      name: dlt_<<ENTITY_NAME>>_silver_pipeline
+      edition: ADVANCED
+      catalog: edl_dev_ctlg
+      configuration:
+        catalog: edl_dev_ctlg
+        schema: structured
+        table_suffix: ${var.table_suffix}
+        dimension_table: <<ENTITY_NAME>>
+        test_mode: "Y"
+      schema: structured
+      clusters: ${var.pipeline_cluster_definition}
+      development: true
+      continuous: false
+      channel: CURRENT      
+      photon: false
+      libraries:        
+        - notebook:
+            path: ${var.resource_path}/notebooks/data_engineering/dlt_silver_integrated_notebook.ipynb
+    dlt_<<ENTITY_NAME>>_gold_pipeline:
+      name: dlt_<<ENTITY_NAME>>_gold_pipeline
+      edition: ADVANCED
+      catalog: edl_dev_ctlg
+      configuration:
+        catalog: edl_dev_ctlg
+        structured_schema: structured
+        curated_schema: curated
+        dimension_table: <<ENTITY_NAME>>
+        table_suffix: ${var.table_suffix}
+      schema: structured
+      clusters: ${var.pipeline_cluster_definition}
+      development: true
+      continuous: false
+      channel: CURRENT
+      photon: false
+      libraries:
+        - notebook:
+            path: ${var.resource_path}/notebooks/data_engineering/dlt_gold_integrated_notebook.ipynb
+      

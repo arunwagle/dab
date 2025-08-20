@@ -1,0 +1,93 @@
+targets:
+  dev:
+    variables:
+      table_suffix: ${workspace.current_user.short_name}_serverless
+
+
+resources:
+  jobs:
+    d_group_job_serverless:
+      name: d_group_job_serverless
+      tasks:
+        - task_key: setup          
+          notebook_task:
+            notebook_path: ${var.resource_path}/notebooks/data_engineering/job_setup_notebook.ipynb
+            # source: WORKSPACE
+        - task_key: load_landing_zone_data
+          depends_on:
+            - task_key: setup
+          notebook_task:
+            notebook_path: ${var.resource_path}/notebooks/data_engineering/job_load_landing_zone_data_notebook.ipynb
+            # source: WORKSPACE
+        - task_key: full_refresh
+          depends_on:
+            - task_key: load_landing_zone_data
+          condition_task:
+            op: EQUAL_TO
+            left: "{{job.parameters.refresh_type}}"
+            right: full_refresh
+        - task_key: incremental_refresh
+          depends_on:
+            - task_key: load_landing_zone_data
+          condition_task:
+            op: EQUAL_TO
+            left: "{{job.parameters.refresh_type}}"
+            right: incremental_refresh
+        - task_key: df_group_silver_pipeline_incremental_run
+          depends_on:
+            - task_key: incremental_refresh
+              outcome: "true"
+          pipeline_task:
+            pipeline_id:  ${resources.pipelines.dlt_d_group_silver_pipeline_serverless.id}
+            full_refresh: false
+        # - task_key: trigger_full_refresh
+        #   depends_on:
+        #     - task_key: load_landing_zone_data
+        #   condition_task:
+        #     op: EQUAL_TO
+        #     left: "{{job.parameters.scenario}}"
+        #     right: trigger_full_refresh
+        - task_key: df_group_silver_pipeline_full_refresh_run
+          depends_on:
+            - task_key: full_refresh
+              outcome: "true"
+            # - task_key: trigger_full_refresh
+            #   outcome: "true"
+          run_if: AT_LEAST_ONE_SUCCESS
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.dlt_d_group_silver_pipeline_serverless.id}
+            full_refresh: true      
+        - task_key: df_group_gold_pipeline_run
+          depends_on:
+            - task_key: df_group_silver_pipeline_incremental_run
+            - task_key: df_group_silver_pipeline_full_refresh_run
+          run_if: AT_LEAST_ONE_SUCCESS
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.dlt_d_group_gold_pipeline_serverless.id}
+      queue:
+        enabled: true
+      parameters:
+        - name: catalog
+          default: ""
+        - name: dimension_table
+          default: ""
+        - name: dlt_runtime_config_table
+          default: ""
+        - name: job_id
+          default: "{{job.id}}"
+        - name: run_id
+          default: "{{job.run_id}}"
+        - name: scenario
+          default: ""
+        - name: scenario_type
+          default: ""
+        - name: schema
+          default: ""
+        - name: source_system
+          default: ""
+        - name: table_suffix
+          default: ${var.table_suffix}
+        - name: test_mode
+          default: Y
+        - name: refresh_type
+          default: ""

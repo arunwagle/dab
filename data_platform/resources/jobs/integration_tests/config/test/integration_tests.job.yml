@@ -1,0 +1,27 @@
+resources:
+  jobs:
+    run_integration_tests:
+      name: run_integration_tests
+      tasks:
+        - task_key: run
+          notebook_task:
+            notebook_path: ${var.resource_path}/notebooks/integration_tests/job_integration_test_notebook.ipynb
+          # existing_cluster_id: ${var.all_purpose_compute_cluster_id}        
+      queue:
+        enabled: true
+      parameters:
+        - name: job_id
+          default: ${resources.jobs.d_group_job_serverless.id}
+        - name: db_workspace_url
+          default: ${workspace.host}
+        - name: catalog
+          default: ${var.catalog}   
+        - name: bronze_schema
+          default: ${var.bronze_schema}  
+        - name: table_suffix
+          default: ${var.table_suffix}
+        - name: dimension_table
+          default: D_GROUP
+        - name: scenario
+          default: 1
+   

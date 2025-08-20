@@ -1,0 +1,100 @@
+# This is a Databricks asset bundle definition for data_platform.
+# See https://docs.databricks.com/dev-tools/bundles/index.html for documentation.
+bundle:
+  name: data_platform
+  uuid: deea3296-ef75-428d-bc48-d4e0a25513f9
+
+artifacts:
+  data_platform:
+    type: whl
+    path: .
+
+include:
+  - resources/jobs/data_engineering/config/d_group/*.yml
+  - resources/jobs/integration_tests/config/test/*.yml
+  - resources/jobs/setup_schemas/config/setup/*.yml
+
+variables:
+
+  use_serverless:
+    description: True is we want to use serverless compute
+    default: Y
+
+  warehouse_id:
+    description: The warehouse id to use for the job
+    default: ab4d5047a3318d86
+
+  all_purpose_compute_cluster_id: 
+    description: Cluster id to use for workflows
+    default: 0626-162829-lg9qaj2r
+    # 0315-230518-8i9o5ha0
+  cluster_policy_id:
+    description: Cluster id to use for workflows
+    default: 0012FAAD6785A749
+
+  pipeline_cluster_definition: 
+    description: The cluster to use for DLT pipelines
+    default: 
+      - label: default
+        node_type_id: Standard_DS3_v2
+        policy_id: ${var.cluster_policy_id}
+        autoscale:
+          min_workers: 1
+          max_workers: 3
+          mode: ENHANCED
+      - label: maintenance
+        policy_id: ${var.cluster_policy_id}
+
+  resource_path:
+    description: The relative path from resource to the root_path
+    default: ../../../../..
+
+  table_suffix:
+    description: The table suffix paramter to use for development. On staging and production this should be null
+    default: ""
+
+  catalog:
+    description: The catalog for this project
+    default: "edl_dev_ctlg"
+  
+  bronze_schema: 
+    description: The catalog for this bronze data
+    default: "structured"
+  
+  silver_schema: 
+    description: The catalog for this bronze data
+    default: "curated"
+
+  gold_schema: 
+    description: The catalog for this bronze data
+    default: "lakeview"
+
+
+targets:
+  dev:
+    # The default target uses 'mode: development' to create a development copy.
+    # - Deployed resources get prefixed with '[dev my_user_name]'
+    # - Any job schedules and triggers are paused by default.
+    # See also https://docs.databricks.com/dev-tools/bundles/deployment-modes.html.
+    mode: development
+    default: true
+    workspace:
+      host: https://adb-5360920319131085.5.azuredatabricks.net
+      # file_path: /Volumes/edl_dev_ctlg/rawfiles/raw/EDF/dab/bundle/${workspace.current_user.short_name}/${bundle.name}/${bundle.target}
+
+    # variables:
+    #   table_suffix: ${workspace.current_user.short_name}
+    permissions:
+      - group_name: AzDev.DnA Big Data Team
+        level: CAN_MANAGE
+      
+  prod:
+    mode: production
+    workspace:
+      host: https://adb-5360920319131085.5.azuredatabricks.net
+      # We explicitly deploy to /Workspace/Users/c73550@lahsic.com to make sure we only have a single copy.
+      root_path: /Workspace/Users/c73550@lahsic.com/.bundle/${bundle.name}/${bundle.target}
+    permissions:
+      - user_name: c73550@lahsic.com
+        level: CAN_MANAGE
+      
