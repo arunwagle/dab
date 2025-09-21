@@ -1,0 +1,23 @@
+trigger:
+  branches:
+    include:
+    - refs/heads/Dev_Release
+resources:
+  repositories:
+  - repository: self
+    type: git
+    ref: refs/heads/main
+jobs:
+- job: Job_1
+  displayName: Agent job 1
+  pool:
+    vmImage: windows-latest
+  steps:
+  - checkout: self
+    fetchDepth: 1
+  - task: PublishBuildArtifacts@1
+    displayName: 'Publish Artifact: HealthyBlue_Databricks'
+    inputs:
+      PathtoPublish: HealthyBlueDatabricks/Notebooks
+      ArtifactName: drop_hb_notebooks
+...
