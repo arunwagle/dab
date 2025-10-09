@@ -1,0 +1,2701 @@
+{
+  "datasets": [
+    {
+      "name": "12496dc1",
+      "displayName": "query_jobs",
+      "queryLines": [
+        "SELECT\r\n",
+        "    job_id,\r\n",
+        "    name AS job_name,\r\n",
+        "    creator_id AS owner,\r\n",
+        "    run_as,\r\n",
+        "    CAST(change_time AS DATE) as last_edited, \r\n",
+        "    -- current_date() - INTERVAL 360 days,\r\n",
+        "    workspace_id,\r\n",
+        "    tags\r\n",
+        "FROM v_system.lakeflow.jobs\r\n",
+        "-- where name = \"Untitled\""
+      ]
+    },
+    {
+      "name": "7f2693eb",
+      "displayName": "query_pipelines",
+      "queryLines": [
+        "SELECT DISTINCT\r\n",
+        "    pipeline_id,\r\n",
+        "    pipeline_type,\r\n",
+        "    name AS job_name,\r\n",
+        "    created_by AS owner,\r\n",
+        "    run_as \r\n",
+        "FROM system.lakeflow.pipelines\r\n",
+        "ORDER BY pipeline_id;"
+      ]
+    },
+    {
+      "name": "aab53035",
+      "displayName": "query_jobs_billing_usage",
+      "queryLines": [
+        "WITH latest_jobs AS (\r\n",
+        "  SELECT\r\n",
+        "    workspace_id,\r\n",
+        "    job_id,\r\n",
+        "    name,\r\n",
+        "    ROW_NUMBER() OVER (PARTITION BY workspace_id, job_id ORDER BY change_time DESC) as rn\r\n",
+        "  FROM system.lakeflow.jobs\r\n",
+        "  QUALIFY rn = 1\r\n",
+        "),\r\n",
+        "job_run_timeline_with_name AS (\r\n",
+        "  SELECT\r\n",
+        "    t.*,\r\n",
+        "    j.name as job_name\r\n",
+        "  FROM system.lakeflow.job_run_timeline t\r\n",
+        "  LEFT JOIN latest_jobs j\r\n",
+        "    ON t.workspace_id = j.workspace_id\r\n",
+        "    AND t.job_id = j.job_id\r\n",
+        "),\r\n",
+        "jobs_usage AS (\r\n",
+        "  SELECT\r\n",
+        "    *,\r\n",
+        "    usage_metadata.job_id,\r\n",
+        "    usage_metadata.job_run_id as run_id,\r\n",
+        "    identity_metadata.run_as as run_as\r\n",
+        "  FROM system.billing.usage\r\n",
+        "  WHERE billing_origin_product IN (\"JOBS\")\r\n",
+        "),\r\n",
+        "jobs_usage_with_usd AS (\r\n",
+        "  SELECT\r\n",
+        "    jobs_usage.*,\r\n",
+        "    --  * list_prices.pricing.effective_list.default\r\n",
+        "    usage_quantity * pricing.effective_list.default as usage_usd\r\n",
+        "  FROM jobs_usage\r\n",
+        "  LEFT JOIN system.billing.list_prices pricing ON\r\n",
+        "    jobs_usage.sku_name = pricing.sku_name\r\n",
+        "    AND pricing.price_start_time <= jobs_usage.usage_start_time\r\n",
+        "    AND (pricing.price_end_time >= jobs_usage.usage_start_time OR pricing.price_end_time IS NULL)\r\n",
+        "    AND pricing.currency_code = \"USD\"\r\n",
+        "),\r\n",
+        "jobs_usage_aggregated AS (\r\n",
+        "  SELECT\r\n",
+        "    workspace_id,\r\n",
+        "    job_id,\r\n",
+        "    run_id,\r\n",
+        "    usage_date, \r\n",
+        "    FIRST(run_as, TRUE) as run_as,\r\n",
+        "    sku_name,\r\n",
+        "    SUM(usage_usd) as usage_usd,\r\n",
+        "    SUM(usage_quantity) as usage_quantity\r\n",
+        "  FROM jobs_usage_with_usd\r\n",
+        "  GROUP BY ALL\r\n",
+        ")\r\n",
+        "SELECT\r\n",
+        "  t1.*,\r\n",
+        "  MIN(t2.period_start_time) as run_start_time,\r\n",
+        "  MAX(t2.period_end_time) as run_end_time,\r\n",
+        "  TIMESTAMPDIFF(\r\n",
+        "      MINUTE,\r\n",
+        "      t2.period_start_time,\r\n",
+        "      t2.period_end_time\r\n",
+        "    ) AS duration_minutes,\r\n",
+        "    TIMESTAMPDIFF(\r\n",
+        "      HOUR,\r\n",
+        "      t2.period_start_time,\r\n",
+        "      t2.period_end_time \r\n",
+        "    ) AS duration_hours,\r\n",
+        "  FIRST(t2.result_state, TRUE) as result_state,\r\n",
+        "  FIRST(t2.job_name, TRUE) as job_name\r\n",
+        "FROM jobs_usage_aggregated t1\r\n",
+        "LEFT JOIN job_run_timeline_with_name t2\r\n",
+        "  ON t1.workspace_id = t2.workspace_id\r\n",
+        "  AND t1.job_id = t2.job_id\r\n",
+        "  AND t1.run_id = t2.run_id\r\n",
+        "-- WHERE t2.job_name = 'submit_process_basic_listings'\r\n",
+        "-- where t1.workspace_id in (:workspace_id)\r\n",
+        "GROUP BY ALL\r\n",
+        "ORDER BY usage_usd DESC\r\n",
+        "-- LIMIT 100"
+      ]
+    },
+    {
+      "name": "e67e1af0",
+      "displayName": "query_usage_data",
+      "queryLines": [
+        "SELECT\r\n",
+        "  usage.account_id,\r\n",
+        "  usage.workspace_id,\r\n",
+        "  usage.sku_name,\r\n",
+        "  usage.cloud,\r\n",
+        "  usage.usage_start_time,\r\n",
+        "  usage.usage_end_time,\r\n",
+        "  usage.usage_date, \r\n",
+        "  usage.usage_type,\r\n",
+        "  identity_metadata.run_as ,\r\n",
+        "  identity_metadata.created_by,\r\n",
+        "  COALESCE(identity_metadata.run_as, identity_metadata.owned_by) AS id,\r\n",
+        "  custom_tags,\r\n",
+        "  -- usage_metadata.*\r\n",
+        "  billing_origin_product,\r\n",
+        "  SUM(\r\n",
+        "    usage.usage_quantity * list_prices.pricing.effective_list.default\r\n",
+        "  ) AS `Total Dollar Cost`\r\n",
+        "FROM v_system.billing.usage\r\n",
+        "JOIN v_system.billing.list_prices\r\n",
+        "  ON list_prices.sku_name = usage.sku_name\r\n",
+        "  AND list_prices.price_start_time <= usage.usage_start_time\r\n",
+        "  AND (list_prices.price_end_time >= usage.usage_start_time OR list_prices.price_end_time IS NULL)\r\n",
+        "  AND list_prices.currency_code = \"USD\"\r\n",
+        "-- where usage.workspace_id in (:workspace_id)\r\n",
+        "\r\n",
+        "GROUP BY ALL"
+      ]
+    },
+    {
+      "name": "e61ba8cf",
+      "displayName": "query_distinct_user_id",
+      "queryLines": [
+        "SELECT DISTINCT\r\n",
+        "  COALESCE(identity_metadata.run_as, identity_metadata.owned_by) AS id,\r\n",
+        "  billing_origin_product,\r\n",
+        "  product_features.*\r\n",
+        "FROM v_system.billing.usage\r\n",
+        "-- WHERE \r\n",
+        "--   workspace_id = ''\r\n",
+        "GROUP BY ALL\r\n",
+        "ORDER BY id NULLS LAST"
+      ]
+    },
+    {
+      "name": "0754369c",
+      "displayName": "query_expensive_jobs",
+      "queryLines": [
+        "SELECT\r\n",
+        "  usage.usage_metadata.job_id,\r\n",
+        "  usage.usage_metadata.job_name,\r\n",
+        "  SUM(usage.usage_quantity) AS total_dbu,\r\n",
+        "  SUM(\r\n",
+        "    usage.usage_quantity * pricing.default\r\n",
+        "  ) AS total_usd\r\n",
+        "FROM\r\n",
+        "  v_system.billing.usage AS usage\r\n",
+        "LEFT JOIN v_system.billing.list_prices AS pricing\r\n",
+        "  ON usage.sku_name = pricing.sku_name\r\n",
+        "  AND pricing.price_start_time <= usage.usage_start_time\r\n",
+        "  AND (\r\n",
+        "    pricing.price_end_time >= usage.usage_start_time\r\n",
+        "    OR pricing.price_end_time IS NULL\r\n",
+        "  )\r\n",
+        "  AND pricing.currency_code = 'USD'\r\n",
+        "WHERE\r\n",
+        "  usage.usage_metadata.job_id IS NOT NULL\r\n",
+        "  AND usage.usage_unit = 'DBU'\r\n",
+        "  AND usage.usage_date >= date_add(\r\n",
+        "    current_date,\r\n",
+        "    -CAST(:param_days AS INT)\r\n",
+        "  )\r\n",
+        "GROUP BY\r\n",
+        "  usage.usage_metadata.job_id,\r\n",
+        "  usage.usage_metadata.job_name\r\n",
+        "ORDER BY\r\n",
+        "  total_dbu DESC"
+      ],
+      "parameters": [
+        {
+          "displayName": "param_days",
+          "keyword": "param_days",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "30"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "15b91a1d",
+      "displayName": "query_expensive_notebooks",
+      "queryLines": [
+        "SELECT\r\n",
+        "  usage_metadata.notebook_id,\r\n",
+        "  usage_metadata.notebook_path,\r\n",
+        "  SUM(usage_quantity) as total_dbu,\r\n",
+        "  SUM(\r\n",
+        "    usage.usage_quantity * pricing.default\r\n",
+        "  ) AS total_usd\r\n",
+        "FROM\r\n",
+        "  v_system.billing.usage AS usage\r\n",
+        "LEFT JOIN v_system.billing.list_prices AS pricing\r\n",
+        "  ON usage.sku_name = pricing.sku_name\r\n",
+        "  AND pricing.price_start_time <= usage.usage_start_time\r\n",
+        "  AND (\r\n",
+        "    pricing.price_end_time >= usage.usage_start_time\r\n",
+        "    OR pricing.price_end_time IS NULL\r\n",
+        "  )\r\n",
+        "  AND pricing.currency_code = 'USD'\r\n",
+        "WHERE\r\n",
+        "  usage_metadata.notebook_id is not null\r\n",
+        "  and billing_origin_product = 'INTERACTIVE'\r\n",
+        "  and product_features.is_serverless\r\n",
+        "  and  usage.usage_unit = 'DBU'\r\n",
+        "  and  usage.usage_date >= DATEADD(day,-CAST(:param_days AS INT), current_date)\r\n",
+        "GROUP BY\r\n",
+        "  ALL\r\n",
+        "ORDER BY\r\n",
+        "  total_dbu DESC"
+      ],
+      "parameters": [
+        {
+          "displayName": "param_days",
+          "keyword": "param_days",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "30"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a5e6c46a",
+      "displayName": "query_dbus_consumed_by_user",
+      "queryLines": [
+        "SELECT\r\n",
+        "  COALESCE(identity_metadata.run_as, identity_metadata.owned_by) AS id,\r\n",
+        "  usage_metadata.job_id,\r\n",
+        "  usage_metadata.job_name,\r\n",
+        "  usage_metadata.notebook_id,\r\n",
+        "  usage_metadata. notebook_path,\r\n",
+        "  SUM(usage_quantity) as total_dbu\r\n",
+        "FROM\r\n",
+        "  v_system.billing.usage\r\n",
+        "WHERE\r\n",
+        "--   identity_metadata.run_as = format_string('%s@%s.%s', :user_name, :domain_name, :top_level_domain)\r\n",
+        "--   and \r\n",
+        "  usage_date >= DATEADD(day, -CAST(:param_days AS INT), current_date)\r\n",
+        "GROUP BY\r\n",
+        "  ALL\r\n",
+        "ORDER BY\r\n",
+        "  total_dbu DESC"
+      ],
+      "parameters": [
+        {
+          "displayName": "param_days",
+          "keyword": "param_days",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "30"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "89fdd59b",
+      "displayName": "query_distinct_workspace_id",
+      "queryLines": [
+        "Select distinct workspace_id from v_system.billing.usage \r\n",
+        "-- where workspace_id=:workspace_id"
+      ]
+    },
+    {
+      "name": "36e88f77",
+      "displayName": "query_udp_tables_summary",
+      "queryLines": [
+        "Select 'silver_json_payloads' as table_name, submission_id, count(*) as record_count\r\n",
+        "from cdl_bronze_dev.poc_udp.silver_json_payloads\r\n",
+        "group by submission_id\r\n",
+        "\r\n",
+        "union all\r\n",
+        "\r\n",
+        "Select 'silver_xml_payloads' as table_name, submission_id, count(*) as record_count\r\n",
+        "from cdl_bronze_dev.poc_udp.silver_xml_payloads\r\n",
+        "group by submission_id\r\n",
+        "\r\n",
+        "union all\r\n",
+        "\r\n",
+        "Select 'gold_json_docs_knowledge_base' as table_name, submission_id, count(*) as record_count\r\n",
+        "from cdl_bronze_dev.poc_udp.gold_json_docs_knowledge_base\r\n",
+        "group by submission_id\r\n",
+        "\r\n",
+        "union all\r\n",
+        "\r\n",
+        "Select 'gold_xml_docs_knowledge_base' as table_name, submission_id, count(*) as record_count\r\n",
+        "from cdl_bronze_dev.poc_udp.gold_xml_docs_knowledge_base\r\n",
+        "group by submission_id\r\n",
+        "\r\n",
+        "order by table_name desc ;"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "80dcf1f2",
+      "displayName": "Global Filters",
+      "pageType": "PAGE_TYPE_GLOBAL_FILTERS"
+    },
+    {
+      "name": "2208d1c6",
+      "displayName": "Billing Overview",
+      "layout": [
+        {
+          "widget": {
+            "name": "b87cca5c",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "e67e1af0",
+                  "fields": [
+                    {
+                      "name": "sum(Total Dollar Cost)",
+                      "expression": "SUM(`Total Dollar Cost`)"
+                    },
+                    {
+                      "name": "billing_origin_product",
+                      "expression": "`billing_origin_product`"
+                    }
+                  ],
+                  "parameterValues": [
+                    {
+                      "keyword": "workspace_id",
+                      "selection": {}
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "pie",
+              "encodings": {
+                "angle": {
+                  "fieldName": "sum(Total Dollar Cost)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Cost By Product"
+                },
+                "color": {
+                  "fieldName": "billing_origin_product",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "label": {
+                  "show": true
+                },
+                "extra": [
+                  {
+                    "fieldName": "sum(Total Dollar Cost)"
+                  }
+                ]
+              },
+              "frame": {
+                "title": "Dollar Cost",
+                "showTitle": true,
+                "showDescription": false
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 3,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "9c74dccd",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "e67e1af0",
+                  "fields": [
+                    {
+                      "name": "daily(usage_date)",
+                      "expression": "DATE_TRUNC(\"DAY\", `usage_date`)"
+                    },
+                    {
+                      "name": "sum(Total Dollar Cost)",
+                      "expression": "SUM(`Total Dollar Cost`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "daily(usage_date)",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Usage Date"
+                },
+                "y": {
+                  "fieldName": "sum(Total Dollar Cost)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Total Dollar Cost Per Day"
+                }
+              },
+              "frame": {
+                "title": "Usage Date Trend",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 1,
+            "width": 3,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "6f090122",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "e61ba8cf",
+                  "fields": [
+                    {
+                      "name": "id",
+                      "expression": "`id`"
+                    },
+                    {
+                      "name": "billing_origin_product",
+                      "expression": "`billing_origin_product`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "id",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 0,
+                    "title": "Run Id/Owner Id",
+                    "allowSearch": true,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "cellFormat": {
+                      "default": {
+                        "foregroundColor": {
+                          "themeColorType": "visualizationColors",
+                          "position": 1
+                        }
+                      },
+                      "rules": []
+                    }
+                  },
+                  {
+                    "fieldName": "billing_origin_product",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 2,
+                    "title": "Billing Product",
+                    "allowSearch": true,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "cellFormat": {
+                      "default": {
+                        "foregroundColor": {
+                          "themeColorType": "visualizationColors",
+                          "position": 2
+                        }
+                      },
+                      "rules": []
+                    }
+                  }
+                ]
+              },
+              "invisibleColumns": [
+                {
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "jobs_tier",
+                  "type": "string",
+                  "displayAs": "string",
+                  "order": 100002,
+                  "title": "jobs_tier",
+                  "allowSearch": false,
+                  "alignContent": "left",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                },
+                {
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "sql_tier",
+                  "type": "string",
+                  "displayAs": "string",
+                  "order": 100003,
+                  "title": "sql_tier",
+                  "allowSearch": false,
+                  "alignContent": "left",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                },
+                {
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "dlt_tier",
+                  "type": "string",
+                  "displayAs": "string",
+                  "order": 100004,
+                  "title": "dlt_tier",
+                  "allowSearch": false,
+                  "alignContent": "left",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                },
+                {
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "is_serverless",
+                  "type": "boolean",
+                  "displayAs": "boolean",
+                  "order": 100005,
+                  "title": "is_serverless",
+                  "allowSearch": false,
+                  "alignContent": "right",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                },
+                {
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "is_photon",
+                  "type": "boolean",
+                  "displayAs": "boolean",
+                  "order": 100006,
+                  "title": "is_photon",
+                  "allowSearch": false,
+                  "alignContent": "right",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                },
+                {
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "serving_type",
+                  "type": "string",
+                  "displayAs": "string",
+                  "order": 100007,
+                  "title": "serving_type",
+                  "allowSearch": false,
+                  "alignContent": "left",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                },
+                {
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "networking",
+                  "type": "complex",
+                  "displayAs": "json",
+                  "order": 100008,
+                  "title": "networking",
+                  "allowSearch": false,
+                  "alignContent": "left",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                },
+                {
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "ai_runtime",
+                  "type": "complex",
+                  "displayAs": "json",
+                  "order": 100009,
+                  "title": "ai_runtime",
+                  "allowSearch": false,
+                  "alignContent": "left",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                },
+                {
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "model_serving",
+                  "type": "complex",
+                  "displayAs": "json",
+                  "order": 100010,
+                  "title": "model_serving",
+                  "allowSearch": false,
+                  "alignContent": "left",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                },
+                {
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "ai_gateway",
+                  "type": "complex",
+                  "displayAs": "json",
+                  "order": 100011,
+                  "title": "ai_gateway",
+                  "allowSearch": false,
+                  "alignContent": "left",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                },
+                {
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "serverless_gpu",
+                  "type": "complex",
+                  "displayAs": "json",
+                  "order": 100012,
+                  "title": "serverless_gpu",
+                  "allowSearch": false,
+                  "alignContent": "left",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                }
+              ],
+              "allowHTMLByDefault": false,
+              "itemsPerPage": 25,
+              "paginationSize": "default",
+              "condensed": true,
+              "withRowNumber": false,
+              "frame": {
+                "title": "Run As or Owned By For Billable Products ",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 6,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "dc42650c",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "0754369c",
+                  "fields": [
+                    {
+                      "name": "job_id",
+                      "expression": "`job_id`"
+                    },
+                    {
+                      "name": "job_name",
+                      "expression": "`job_name`"
+                    },
+                    {
+                      "name": "total_dbu",
+                      "expression": "`total_dbu`"
+                    },
+                    {
+                      "name": "total_usd",
+                      "expression": "`total_usd`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "job_id",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 100000,
+                    "title": "job_id",
+                    "allowSearch": true,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false
+                  },
+                  {
+                    "fieldName": "job_name",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 100001,
+                    "title": "Job Name",
+                    "allowSearch": true,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false
+                  },
+                  {
+                    "fieldName": "total_dbu",
+                    "numberFormat": "'0,0.0'",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "decimal",
+                    "displayAs": "number",
+                    "visible": true,
+                    "order": 100002,
+                    "title": "total_dbu",
+                    "allowSearch": false,
+                    "alignContent": "right",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false
+                  },
+                  {
+                    "fieldName": "total_usd",
+                    "numberFormat": "'0,0.0'",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "decimal",
+                    "displayAs": "number",
+                    "visible": true,
+                    "order": 100003,
+                    "title": "total_usd",
+                    "allowSearch": false,
+                    "alignContent": "right",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false
+                  }
+                ]
+              },
+              "invisibleColumns": [],
+              "allowHTMLByDefault": false,
+              "itemsPerPage": 25,
+              "paginationSize": "default",
+              "condensed": true,
+              "withRowNumber": false,
+              "frame": {
+                "title": "Total DBU's consumed by Jobs (not ones run by All Purpose compute)",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 7,
+            "width": 3,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "64ddbaf0",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "15b91a1d",
+                  "fields": [
+                    {
+                      "name": "notebook_path",
+                      "expression": "`notebook_path`"
+                    },
+                    {
+                      "name": "total_dbu",
+                      "expression": "`total_dbu`"
+                    },
+                    {
+                      "name": "total_usd",
+                      "expression": "`total_usd`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "notebook_path",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 100001,
+                    "title": "Notebook",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "defaultColumnWidth": 400
+                  },
+                  {
+                    "fieldName": "total_dbu",
+                    "numberFormat": "'0,0.0'",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "decimal",
+                    "displayAs": "number",
+                    "visible": true,
+                    "order": 100002,
+                    "title": "Total DBU",
+                    "allowSearch": false,
+                    "alignContent": "right",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false
+                  },
+                  {
+                    "fieldName": "total_usd",
+                    "numberFormat": "'0,0.0'",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "decimal",
+                    "displayAs": "number",
+                    "visible": true,
+                    "order": 100003,
+                    "title": "total_usd",
+                    "allowSearch": false,
+                    "alignContent": "right",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false
+                  }
+                ]
+              },
+              "invisibleColumns": [
+                {
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "notebook_id",
+                  "type": "string",
+                  "displayAs": "string",
+                  "order": 100000,
+                  "title": "notebook_id",
+                  "allowSearch": false,
+                  "alignContent": "left",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                }
+              ],
+              "allowHTMLByDefault": false,
+              "itemsPerPage": 25,
+              "paginationSize": "default",
+              "condensed": true,
+              "withRowNumber": false,
+              "frame": {
+                "showTitle": true,
+                "title": "Total DBU's consumed by Notebooks"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 13,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "1c183a44",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "a5e6c46a",
+                  "fields": [
+                    {
+                      "name": "id",
+                      "expression": "`id`"
+                    },
+                    {
+                      "name": "job_name",
+                      "expression": "`job_name`"
+                    },
+                    {
+                      "name": "total_dbu",
+                      "expression": "`total_dbu`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "id",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 0,
+                    "title": "id",
+                    "allowSearch": true,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "defaultColumnWidth": 200
+                  },
+                  {
+                    "fieldName": "job_name",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 1,
+                    "title": "job_name",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "defaultColumnWidth": 200
+                  },
+                  {
+                    "fieldName": "total_dbu",
+                    "numberFormat": "'0.0,0'",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "decimal",
+                    "displayAs": "number",
+                    "visible": true,
+                    "order": 2,
+                    "title": "total_dbu",
+                    "allowSearch": false,
+                    "alignContent": "right",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false
+                  }
+                ]
+              },
+              "invisibleColumns": [
+                {
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "notebook_path",
+                  "type": "string",
+                  "displayAs": "string",
+                  "order": 3,
+                  "title": "notebook_path",
+                  "allowSearch": false,
+                  "alignContent": "left",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                },
+                {
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "notebook_id",
+                  "type": "string",
+                  "displayAs": "string",
+                  "order": 4,
+                  "title": "notebook_id",
+                  "allowSearch": false,
+                  "alignContent": "left",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                },
+                {
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "job_id",
+                  "type": "string",
+                  "displayAs": "string",
+                  "order": 5,
+                  "title": "job_id",
+                  "allowSearch": false,
+                  "alignContent": "left",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                }
+              ],
+              "allowHTMLByDefault": false,
+              "itemsPerPage": 25,
+              "paginationSize": "default",
+              "condensed": true,
+              "withRowNumber": false,
+              "frame": {
+                "showTitle": true,
+                "title": "Total DBU's consumed by users"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 13,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "1a48d6a4",
+            "queries": [
+              {
+                "name": "dashboards/01f0a1f0b6c91b6682892fc606a3a213/datasets/01f0a1fceea91e48bc07e7b4b52042f0_workspace_id",
+                "query": {
+                  "datasetName": "e67e1af0",
+                  "fields": [
+                    {
+                      "name": "workspace_id",
+                      "expression": "`workspace_id`"
+                    },
+                    {
+                      "name": "workspace_id_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "workspace_id",
+                    "queryName": "dashboards/01f0a1f0b6c91b6682892fc606a3a213/datasets/01f0a1fceea91e48bc07e7b4b52042f0_workspace_id"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true
+              }
+            },
+            "specExtensions": {
+              "widgetBackgroundColor": {
+                "light": "#D7EAF1"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 2,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "432cf156",
+            "queries": [
+              {
+                "name": "dashboards/01f0a1f0b6c91b6682892fc606a3a213/datasets/01f0a1fceea91e48bc07e7b4b52042f0_usage_date",
+                "query": {
+                  "datasetName": "e67e1af0",
+                  "fields": [
+                    {
+                      "name": "usage_date",
+                      "expression": "`usage_date`"
+                    },
+                    {
+                      "name": "usage_date_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-date-range-picker",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "usage_date",
+                    "queryName": "dashboards/01f0a1f0b6c91b6682892fc606a3a213/datasets/01f0a1fceea91e48bc07e7b4b52042f0_usage_date"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true
+              }
+            },
+            "specExtensions": {
+              "widgetBackgroundColor": {
+                "light": "#D7EAF1"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 0,
+            "width": 2,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "5efe6176",
+            "queries": [
+              {
+                "name": "parameter_dashboards/01f0a1f0b6c91b6682892fc606a3a213/datasets/01f0a2149a8316f6b92a050a250d8774_param_days",
+                "query": {
+                  "datasetName": "0754369c",
+                  "parameters": [
+                    {
+                      "name": "param_days",
+                      "keyword": "param_days"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "parameterName": "param_days",
+                    "queryName": "parameter_dashboards/01f0a1f0b6c91b6682892fc606a3a213/datasets/01f0a2149a8316f6b92a050a250d8774_param_days"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Days"
+              }
+            },
+            "specExtensions": {
+              "widgetBackgroundColor": {
+                "light": "#D7EAF1"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 6,
+            "width": 2,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "c9bcb7a8",
+            "queries": [
+              {
+                "name": "parameter_dashboards/01f0a1f0b6c91b6682892fc606a3a213/datasets/01f0a2be64bf1bbbbe71c309ce876011_param_days",
+                "query": {
+                  "datasetName": "15b91a1d",
+                  "parameters": [
+                    {
+                      "name": "param_days",
+                      "keyword": "param_days"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "parameterName": "param_days",
+                    "queryName": "parameter_dashboards/01f0a1f0b6c91b6682892fc606a3a213/datasets/01f0a2be64bf1bbbbe71c309ce876011_param_days"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true
+              }
+            },
+            "specExtensions": {
+              "widgetBackgroundColor": {
+                "light": "#D7EAF1"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 12,
+            "width": 2,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "e60738ab",
+            "queries": [
+              {
+                "name": "parameter_dashboards/01f0a1f0b6c91b6682892fc606a3a213/datasets/01f0a2bf2e701c75822038e008464240_param_days",
+                "query": {
+                  "datasetName": "a5e6c46a",
+                  "parameters": [
+                    {
+                      "name": "param_days",
+                      "keyword": "param_days"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "parameterName": "param_days",
+                    "queryName": "parameter_dashboards/01f0a1f0b6c91b6682892fc606a3a213/datasets/01f0a2bf2e701c75822038e008464240_param_days"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true
+              }
+            },
+            "specExtensions": {
+              "widgetBackgroundColor": {
+                "light": "#D7EAF1"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 12,
+            "width": 2,
+            "height": 1
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS"
+    },
+    {
+      "name": "c2e9e6f5",
+      "displayName": "Jobs Overview",
+      "layout": [
+        {
+          "widget": {
+            "name": "7c938a62",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "aab53035",
+                  "fields": [
+                    {
+                      "name": "sum(usage_usd)",
+                      "expression": "SUM(`usage_usd`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(usage_usd)"
+                }
+              },
+              "frame": {
+                "title": "Total Jobs Usage Cost",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 3,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "23ae02d6",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "aab53035",
+                  "fields": [
+                    {
+                      "name": "sum(usage_usd)",
+                      "expression": "SUM(`usage_usd`)"
+                    },
+                    {
+                      "name": "sku_name",
+                      "expression": "`sku_name`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "pie",
+              "encodings": {
+                "angle": {
+                  "fieldName": "sum(usage_usd)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Usage"
+                },
+                "color": {
+                  "fieldName": "sku_name",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "SKU"
+                }
+              },
+              "frame": {
+                "title": "Total Jobs Usage Cost by SKU",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 1,
+            "width": 3,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "04f6e257",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "aab53035",
+                  "fields": [
+                    {
+                      "name": "sum(usage_quantity)",
+                      "expression": "SUM(`usage_quantity`)"
+                    },
+                    {
+                      "name": "result_state",
+                      "expression": "`result_state`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "pie",
+              "encodings": {
+                "angle": {
+                  "fieldName": "sum(usage_quantity)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Total Usage (QTY)"
+                },
+                "color": {
+                  "fieldName": "result_state",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "SUCCEEDED",
+                        "color": {
+                          "themeColorType": "visualizationColors",
+                          "position": 3
+                        }
+                      },
+                      {
+                        "value": "FAILED",
+                        "color": {
+                          "themeColorType": "visualizationColors",
+                          "position": 5
+                        }
+                      },
+                      {
+                        "value": "CANCELLED",
+                        "color": {
+                          "themeColorType": "visualizationColors",
+                          "position": 2
+                        }
+                      },
+                      {
+                        "value": null,
+                        "color": {
+                          "themeColorType": "visualizationColors",
+                          "position": 4
+                        }
+                      },
+                      {
+                        "value": "ERROR",
+                        "color": {
+                          "themeColorType": "visualizationColors",
+                          "position": 6
+                        }
+                      },
+                      {
+                        "value": "TIMED_OUT",
+                        "color": {
+                          "themeColorType": "visualizationColors",
+                          "position": 1
+                        }
+                      },
+                      {
+                        "value": "SKIPPED",
+                        "color": {
+                          "themeColorType": "visualizationColors",
+                          "position": 5
+                        }
+                      }
+                    ]
+                  }
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "frame": {
+                "title": "Total Jobs Usage Quantity",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 5,
+            "width": 3,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "0d8c9008",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "aab53035",
+                  "fields": [
+                    {
+                      "name": "sum(usage_usd)",
+                      "expression": "SUM(`usage_usd`)"
+                    },
+                    {
+                      "name": "result_state",
+                      "expression": "`result_state`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "pie",
+              "encodings": {
+                "angle": {
+                  "fieldName": "sum(usage_usd)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Total Usage (USD)"
+                },
+                "color": {
+                  "fieldName": "result_state",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "SUCCEEDED",
+                        "color": {
+                          "themeColorType": "visualizationColors",
+                          "position": 3
+                        }
+                      },
+                      {
+                        "value": "ERROR",
+                        "color": {
+                          "themeColorType": "visualizationColors",
+                          "position": 6
+                        }
+                      },
+                      {
+                        "value": null,
+                        "color": {
+                          "themeColorType": "visualizationColors",
+                          "position": 4
+                        }
+                      },
+                      {
+                        "value": "CANCELLED",
+                        "color": {
+                          "themeColorType": "visualizationColors",
+                          "position": 2
+                        }
+                      },
+                      {
+                        "value": "FAILED",
+                        "color": {
+                          "themeColorType": "visualizationColors",
+                          "position": 5
+                        }
+                      },
+                      {
+                        "value": "TIMED_OUT",
+                        "color": {
+                          "themeColorType": "selectionColor"
+                        }
+                      }
+                    ]
+                  }
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "frame": {
+                "title": "Total Jobs Usage Cost",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 5,
+            "width": 3,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "bd46f487",
+            "queries": [
+              {
+                "name": "dashboards/01f0a1f0b6c91b6682892fc606a3a213/datasets/01f0a1f58d8b10ac9a0b0f12bcc58e7e_workspace_id",
+                "query": {
+                  "datasetName": "aab53035",
+                  "fields": [
+                    {
+                      "name": "workspace_id",
+                      "expression": "`workspace_id`"
+                    },
+                    {
+                      "name": "workspace_id_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "workspace_id",
+                    "queryName": "dashboards/01f0a1f0b6c91b6682892fc606a3a213/datasets/01f0a1f58d8b10ac9a0b0f12bcc58e7e_workspace_id"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true
+              }
+            },
+            "specExtensions": {
+              "widgetBackgroundColor": {
+                "light": "#D7EAF1"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 2,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "5dddd4e7",
+            "queries": [
+              {
+                "name": "dashboards/01f0a1f0b6c91b6682892fc606a3a213/datasets/01f0a1f58d8b10ac9a0b0f12bcc58e7e_usage_date",
+                "query": {
+                  "datasetName": "aab53035",
+                  "fields": [
+                    {
+                      "name": "usage_date",
+                      "expression": "`usage_date`"
+                    },
+                    {
+                      "name": "usage_date_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-date-range-picker",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "usage_date",
+                    "queryName": "dashboards/01f0a1f0b6c91b6682892fc606a3a213/datasets/01f0a1f58d8b10ac9a0b0f12bcc58e7e_usage_date"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true
+              },
+              "selection": {
+                "defaultSelection": {
+                  "range": {
+                    "dataType": "DATE",
+                    "min": {
+                      "value": "now-60d/d"
+                    },
+                    "max": {
+                      "value": "now/d"
+                    }
+                  }
+                }
+              }
+            },
+            "specExtensions": {
+              "widgetBackgroundColor": {
+                "light": "#D7EAF1"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 0,
+            "width": 2,
+            "height": 1
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS"
+    },
+    {
+      "name": "8e67df4e",
+      "displayName": "Job Details",
+      "layout": [
+        {
+          "widget": {
+            "name": "205b23d2",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "12496dc1",
+                  "fields": [
+                    {
+                      "name": "job_id",
+                      "expression": "`job_id`"
+                    },
+                    {
+                      "name": "job_name",
+                      "expression": "`job_name`"
+                    },
+                    {
+                      "name": "owner",
+                      "expression": "`owner`"
+                    },
+                    {
+                      "name": "run_as",
+                      "expression": "`run_as`"
+                    },
+                    {
+                      "name": "tags",
+                      "expression": "`tags`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "job_id",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 100000,
+                    "title": "job_id",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false
+                  },
+                  {
+                    "fieldName": "job_name",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 100001,
+                    "title": "job_name",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false
+                  },
+                  {
+                    "fieldName": "owner",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 100002,
+                    "title": "owner",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false
+                  },
+                  {
+                    "fieldName": "run_as",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 100003,
+                    "title": "run_as",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false
+                  },
+                  {
+                    "fieldName": "tags",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "complex",
+                    "displayAs": "json",
+                    "visible": true,
+                    "order": 100006,
+                    "title": "tags",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false
+                  }
+                ]
+              },
+              "invisibleColumns": [
+                {
+                  "dateTimeFormat": "DD/MM/YYYY",
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "last_edited",
+                  "type": "date",
+                  "displayAs": "datetime",
+                  "order": 100004,
+                  "title": "last_edited",
+                  "allowSearch": false,
+                  "alignContent": "right",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                },
+                {
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "workspace_id",
+                  "type": "string",
+                  "displayAs": "string",
+                  "order": 100005,
+                  "title": "workspace_id",
+                  "allowSearch": false,
+                  "alignContent": "left",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                }
+              ],
+              "allowHTMLByDefault": false,
+              "itemsPerPage": 25,
+              "paginationSize": "default",
+              "condensed": true,
+              "withRowNumber": false,
+              "frame": {
+                "title": "Jobs List",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "bf0278ac",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "7f2693eb",
+                  "fields": [
+                    {
+                      "name": "pipeline_id",
+                      "expression": "`pipeline_id`"
+                    },
+                    {
+                      "name": "pipeline_type",
+                      "expression": "`pipeline_type`"
+                    },
+                    {
+                      "name": "owner",
+                      "expression": "`owner`"
+                    },
+                    {
+                      "name": "run_as",
+                      "expression": "`run_as`"
+                    },
+                    {
+                      "name": "job_name",
+                      "expression": "`job_name`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "pipeline_id",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 0,
+                    "title": "pipeline_id",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false
+                  },
+                  {
+                    "fieldName": "pipeline_type",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 1,
+                    "title": "pipeline_type",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false
+                  },
+                  {
+                    "fieldName": "owner",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 2,
+                    "title": "owner",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false
+                  },
+                  {
+                    "fieldName": "run_as",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 3,
+                    "title": "run_as",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false
+                  },
+                  {
+                    "fieldName": "job_name",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 4,
+                    "title": "job_name",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false
+                  }
+                ]
+              },
+              "invisibleColumns": [],
+              "allowHTMLByDefault": false,
+              "itemsPerPage": 25,
+              "paginationSize": "default",
+              "condensed": true,
+              "withRowNumber": false,
+              "frame": {
+                "title": "Pipeline List",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 7,
+            "width": 6,
+            "height": 5
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS"
+    },
+    {
+      "name": "498029a2",
+      "displayName": "UDP Tables Details",
+      "layout": [
+        {
+          "widget": {
+            "name": "377f78ec",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "36e88f77",
+                  "fields": [
+                    {
+                      "name": "table_name",
+                      "expression": "`table_name`"
+                    },
+                    {
+                      "name": "submission_id",
+                      "expression": "`submission_id`"
+                    },
+                    {
+                      "name": "record_count",
+                      "expression": "`record_count`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "table_name",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 100000,
+                    "title": "table_name",
+                    "allowSearch": true,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false
+                  },
+                  {
+                    "fieldName": "submission_id",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 100001,
+                    "title": "submission_id",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false
+                  },
+                  {
+                    "fieldName": "record_count",
+                    "numberFormat": "0",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "integer",
+                    "displayAs": "number",
+                    "visible": true,
+                    "order": 100002,
+                    "title": "record_count",
+                    "allowSearch": false,
+                    "alignContent": "right",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false
+                  }
+                ]
+              },
+              "invisibleColumns": [],
+              "allowHTMLByDefault": false,
+              "itemsPerPage": 25,
+              "paginationSize": "default",
+              "condensed": true,
+              "withRowNumber": false,
+              "frame": {
+                "title": "Record Count by Table with submissions",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "d30acb64",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "36e88f77",
+                  "fields": [
+                    {
+                      "name": "sum(record_count)",
+                      "expression": "SUM(`record_count`)"
+                    },
+                    {
+                      "name": "table_name",
+                      "expression": "`table_name`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "pie",
+              "encodings": {
+                "angle": {
+                  "fieldName": "sum(record_count)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "table_name",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "frame": {
+                "title": "Proportion of Records by Table",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 0,
+            "width": 3,
+            "height": 6
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS"
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED"
+    }
+  }
+}
